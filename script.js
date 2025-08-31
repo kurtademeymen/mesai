@@ -17,8 +17,6 @@ const logoutButton = document.getElementById('btnLogout');
 const durumMesaji = document.getElementById('durum');
 const welcomeMessage = document.getElementById('welcome-message');
 const totalMesaiDisplay = document.getElementById('total-mesai-display');
-
-// YENİ: Admin Panel Elementleri
 const adminControls = document.getElementById('admin-controls');
 const btnToggleAdminPanel = document.getElementById('btnToggleAdminPanel');
 const btnDeleteAllShifts = document.getElementById('btnDeleteAllShifts');
@@ -26,17 +24,20 @@ const adminPanelModal = document.getElementById('admin-panel-modal');
 const closeAdminPanel = document.getElementById('close-admin-panel');
 const activeShiftsList = document.getElementById('active-shifts-list');
 const btnRefreshList = document.getElementById('btnRefreshList');
+const btnToggleAddShiftPanel = document.getElementById('btnToggleAddShiftPanel');
+const addShiftModal = document.getElementById('add-shift-modal');
+const closeAddShiftPanel = document.getElementById('close-add-shift-panel');
+const addShiftForm = document.getElementById('add-shift-form');
 
 let selectedDepartment = null;
+let shiftCheckInterval = null; // Otomatik kontrol için
 
-// --- SAYFA YÜKLENDİĞİNDE ÇALIŞACAK ANA FONKSİYON
 document.addEventListener('DOMContentLoaded', () => {
     const user = getLoggedInUser();
     if (user) { showDashboard(user); } 
     else { showLogin(); }
 });
 
-// --- DEPARTMAN SEÇİMİ
 [btnLSPD, btnLSMD].forEach(button => {
     button.addEventListener('click', () => {
         selectedDepartment = button.dataset.department;
@@ -47,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// --- GİRİŞ / ÇIKIŞ VE EKRAN YÖNETİMİ
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!selectedDepartment) { alert('Lütfen önce bir departman seçin!'); return; }
@@ -61,9 +61,7 @@ loginForm.addEventListener('submit', async (e) => {
             const user = { username: userData[0].KullaniciAdi, role: userData[0].Rol, department: userData[0].Departman };
             saveUserToLocalStorage(user);
             showDashboard(user);
-        } else {
-            alert('Kullanıcı adı veya şifre hatalı ya da bu departmana ait değilsiniz!');
-        }
+        } else { alert('Kullanıcı adı veya şifre hatalı ya da bu departmana ait değilsiniz!'); }
     } catch (error) { alert('Giriş yapılırken bir hata oluştu: ' + error.message); }
 });
 
@@ -81,25 +79,25 @@ function showLogin() {
     usernameInput.value = '';
     passwordInput.value = '';
     selectedDepartment = null;
+    stopShiftStatusChecker(); // Otomatik kontrolü durdur
 }
 
 async function showDashboard(user) {
     loginContainer.style.display = 'none';
     dashboardContainer.style.display = 'block';
     welcomeMessage.textContent = `Hoş geldin, ${user.username}! (${user.department})`;
-    // Admin ise admin kontrol butonlarını göster
     if (user.role === 'admin') {
         adminControls.style.display = 'block';
-        logoutButton.style.display = 'none'; // Çıkış yap butonu admin kontrollerinin yanında olmasın
+        logoutButton.style.display = 'block';
     } else {
         adminControls.style.display = 'none';
         logoutButton.style.display = 'inline-block';
     }
     await updateTotalMesaiDisplay(user.username);
     await checkActiveShift(user.username);
+    startShiftStatusChecker(user.username); // Otomatik kontrolü başlat
 }
 
-// --- MESAI İŞLEMLERİ (Değişiklik yok)
 mesaiButton.addEventListener('click', () => {
     const user = getLoggedInUser();
     if (!user) return;
@@ -111,11 +109,12 @@ async function mesaiBaslat(kullanici) {
     durumMesaji.textContent = 'Mesai başlatılıyor...';
     mesaiButton.disabled = true;
     const baslangicZamani = new Date().toISOString();
+    const user = getLoggedInUser();
     try {
         await fetch(MESAI_API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: [{ 'Kullanıcı': kullanici, 'Mesai Giriş': baslangicZamani, 'Mesai Çıkış': '', 'Toplam Süre': '' }] })
+            body: JSON.stringify({ data: [{ 'Kullanıcı': kullanici, 'Departman': user.department, 'Mesai Giriş': baslangicZamani, 'Mesai Çıkış': '', 'Toplam Süre': '' }] })
         });
         setMesaiButtonState('bitir');
         durumMesaji.textContent = `${kullanici} mesaiye başladı!`;
@@ -133,7 +132,11 @@ async function mesaiBitir(kullanici) {
         const searchResponse = await fetch(`${MESAI_API_URL}/search?Kullanıcı=${kullanici}&Mesai Çıkış=`);
         if (!searchResponse.ok) throw new Error('Aktif mesai aranırken API hatası.');
         const activeShifts = await searchResponse.json();
-        if (activeShifts.length === 0) throw new Error('Güncellenecek aktif mesai bulunamadı.');
+        if (activeShifts.length === 0) {
+            durumMesaji.textContent = 'Aktif mesainiz bulunmuyor. Muhtemelen bir yönetici tarafından sonlandırıldı.';
+            setMesaiButtonState('baslat');
+            return;
+        }
         const shiftToUpdate = activeShifts[0];
         const baslangicZamaniStr = shiftToUpdate['Mesai Giriş'];
         const baslangicTimestamp = new Date(baslangicZamaniStr).getTime();
@@ -155,98 +158,127 @@ async function mesaiBitir(kullanici) {
     }
 }
 
-// ############# YENİ ADMIN FONKSİYONLARI #############
+function startShiftStatusChecker(username) {
+    stopShiftStatusChecker();
+    shiftCheckInterval = setInterval(async () => {
+        if (dashboardContainer.style.display === 'block') {
+            try {
+                const response = await fetch(`${MESAI_API_URL}/search?Kullanıcı=${username}&Mesai Çıkış=`);
+                const activeShifts = await response.json();
+                if (activeShifts.length === 0 && mesaiButton.classList.contains('bitir')) {
+                    console.log("Otomatik kontrol: Mesainin dışarıdan kapatıldığı tespit edildi. Arayüz güncelleniyor.");
+                    setMesaiButtonState('baslat');
+                    durumMesaji.textContent = 'Mesainiz bir yönetici tarafından sonlandırıldı.';
+                }
+            } catch (error) {
+                console.error("Otomatik mesai durumu kontrolü sırasında hata:", error);
+            }
+        }
+    }, 30000);
+}
 
-// Admin panelini açma/kapama ve yenileme
+function stopShiftStatusChecker() {
+    if (shiftCheckInterval) {
+        clearInterval(shiftCheckInterval);
+        shiftCheckInterval = null;
+    }
+}
+
 btnToggleAdminPanel.addEventListener('click', () => {
     adminPanelModal.style.display = 'block';
     fetchAndDisplayActiveShifts();
 });
 closeAdminPanel.addEventListener('click', () => { adminPanelModal.style.display = 'none'; });
-window.addEventListener('click', (event) => { if (event.target == adminPanelModal) { adminPanelModal.style.display = 'none'; } });
+btnToggleAddShiftPanel.addEventListener('click', () => { addShiftModal.style.display = 'block'; });
+closeAddShiftPanel.addEventListener('click', () => { addShiftModal.style.display = 'none'; });
+window.addEventListener('click', (event) => { 
+    if (event.target == adminPanelModal) adminPanelModal.style.display = 'none';
+    if (event.target == addShiftModal) addShiftModal.style.display = 'none';
+});
 btnRefreshList.addEventListener('click', fetchAndDisplayActiveShifts);
 
-// Aktif mesaileri çeken ve listeleyen fonksiyon
 async function fetchAndDisplayActiveShifts() {
     activeShiftsList.innerHTML = '<p>Aktif mesailer yükleniyor...</p>';
+    const admin = getLoggedInUser();
     try {
-        const response = await fetch(`${MESAI_API_URL}/search?Mesai Çıkış=`);
+        const response = await fetch(`${MESAI_API_URL}/search?Mesai Çıkış=&Departman=${admin.department}`);
         const shifts = await response.json();
-        activeShiftsList.innerHTML = ''; // Listeyi temizle
-
+        activeShiftsList.innerHTML = '';
         if (shifts.length === 0) {
-            activeShiftsList.innerHTML = '<p>Şu anda aktif mesaisi olan kimse yok.</p>';
+            activeShiftsList.innerHTML = `<p>Şu anda ${admin.department} departmanında aktif mesaisi olan kimse yok.</p>`;
             return;
         }
-
         shifts.forEach(shift => {
             const shiftItem = document.createElement('div');
             shiftItem.className = 'shift-item';
-
             const startTime = new Date(shift['Mesai Giriş']);
             const formattedTime = startTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-
             shiftItem.innerHTML = `
-                <div class="shift-info">
-                    <strong>${shift['Kullanıcı']}</strong> - Başlangıç: ${formattedTime}
-                </div>
+                <div class="shift-info"><strong>${shift['Kullanıcı']}</strong> - Başlangıç: ${formattedTime}</div>
                 <div class="shift-actions">
                     <button class="btn-close-shift">Mesaiyi Kapat</button>
                     <button class="btn-delete-shift">Mesaiyi Sil</button>
                 </div>
             `;
-
-            // Butonlara olay dinleyicileri ekle
             shiftItem.querySelector('.btn-close-shift').addEventListener('click', () => adminCloseShift(shift['Mesai Giriş']));
             shiftItem.querySelector('.btn-delete-shift').addEventListener('click', () => adminDeleteShift(shift['Mesai Giriş']));
-
             activeShiftsList.appendChild(shiftItem);
         });
-
     } catch (error) {
         activeShiftsList.innerHTML = `<p style="color: var(--danger-red);">Mesailer yüklenirken hata oluştu: ${error.message}</p>`;
     }
 }
 
-// Adminin bir mesaiyi normal şekilde kapatması
 async function adminCloseShift(shiftStartTime) {
     if (!confirm("Bu kullanıcının mesaisi normal şekilde sonlandırılacak. Onaylıyor musunuz?")) return;
-
     try {
         const baslangicTimestamp = new Date(shiftStartTime).getTime();
         const toplamSn = Math.round((Date.now() - baslangicTimestamp) / 1000);
         const bitisZamani = new Date().toISOString();
-
         await fetch(`${MESAI_API_URL}/Mesai Giriş/${encodeURIComponent(shiftStartTime)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: { 'Mesai Çıkış': bitisZamani, 'Toplam Süre': toplamSn } })
         });
-
         alert("Mesai başarıyla kapatıldı.");
-        fetchAndDisplayActiveShifts(); // Listeyi yenile
-    } catch (error) {
-        alert("Mesai kapatılırken bir hata oluştu: " + error.message);
-    }
+        fetchAndDisplayActiveShifts();
+    } catch (error) { alert("Mesai kapatılırken bir hata oluştu: " + error.message); }
 }
 
-// Adminin bir mesaiyi tamamen silmesi
 async function adminDeleteShift(shiftStartTime) {
     if (!confirm("DİKKAT! Bu mesai kaydı kalıcı olarak silinecek ve hiç yapılmamış gibi olacak. Emin misiniz?")) return;
-
     try {
-        await fetch(`${MESAI_API_URL}/Mesai Giriş/${encodeURIComponent(shiftStartTime)}`, {
-            method: 'DELETE'
-        });
-
+        await fetch(`${MESAI_API_URL}/Mesai Giriş/${encodeURIComponent(shiftStartTime)}`, { method: 'DELETE' });
         alert("Mesai kaydı başarıyla silindi.");
-        fetchAndDisplayActiveShifts(); // Listeyi yenile
-    } catch (error) {
-        alert("Mesai silinirken bir hata oluştu: " + error.message);
-    }
+        fetchAndDisplayActiveShifts();
+    } catch (error) { alert("Mesai silinirken bir hata oluştu: " + error.message); }
 }
 
-// Bütün kayıtları silme butonu
+addShiftForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('add-shift-username').value;
+    const department = document.getElementById('add-shift-department').value;
+    const start = document.getElementById('add-shift-start').value;
+    const end = document.getElementById('add-shift-end').value;
+    if (!username || !department || !start || !end) { alert('Tüm alanlar doldurulmalıdır.'); return; }
+    const startTime = new Date(start);
+    const endTime = new Date(end);
+    if (startTime >= endTime) { alert('Bitiş zamanı, başlangıç zamanından sonra olmalıdır.'); return; }
+    const durationInSeconds = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
+    const shiftData = { 'Kullanıcı': username, 'Departman': department, 'Mesai Giriş': startTime.toISOString(), 'Mesai Çıkış': endTime.toISOString(), 'Toplam Süre': durationInSeconds };
+    try {
+        const response = await fetch(MESAI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: [shiftData] })
+        });
+        if (!response.ok) throw new Error('API\'ye veri gönderilemedi.');
+        alert(`${username} için mesai başarıyla eklendi.`);
+        addShiftForm.reset();
+        addShiftModal.style.display = 'none';
+    } catch (error) { alert('Mesai eklenirken hata oluştu: ' + error.message); }
+});
+
 btnDeleteAllShifts.addEventListener('click', async () => {
     if (confirm("EMİN MİSİNİZ? TÜM MESAİ KAYITLARI SİLİNECEK! Bu işlem geri alınamaz.")) {
         try {
@@ -254,14 +286,10 @@ btnDeleteAllShifts.addEventListener('click', async () => {
             alert('Tüm mesai kayıtları başarıyla silindi!');
             const user = getLoggedInUser();
             if (user) await updateTotalMesaiDisplay(user.username);
-        } catch (error) {
-            alert('Hata: ' + error.message);
-        }
+        } catch (error) { alert('Hata: ' + error.message); }
     }
 });
 
-
-// --- YARDIMCI FONKSİYONLAR (Değişiklik yok) ---
 function saveUserToLocalStorage(user) { localStorage.setItem('loggedInUser', JSON.stringify(user)); }
 function getLoggedInUser() { return JSON.parse(localStorage.getItem('loggedInUser')); }
 
