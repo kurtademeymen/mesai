@@ -30,7 +30,7 @@ const closeAddShiftPanel = document.getElementById('close-add-shift-panel');
 const addShiftForm = document.getElementById('add-shift-form');
 
 let selectedDepartment = null;
-let shiftCheckInterval = null; // Otomatik kontrol için
+let shiftCheckInterval = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     const user = getLoggedInUser();
@@ -79,23 +79,25 @@ function showLogin() {
     usernameInput.value = '';
     passwordInput.value = '';
     selectedDepartment = null;
-    stopShiftStatusChecker(); // Otomatik kontrolü durdur
+    stopShiftStatusChecker();
 }
 
 async function showDashboard(user) {
     loginContainer.style.display = 'none';
     dashboardContainer.style.display = 'block';
     welcomeMessage.textContent = `Hoş geldin, ${user.username}! (${user.department})`;
+    
+    // DÜZELTME 3: Adminler için de çıkış butonu her zaman görünür olacak.
     if (user.role === 'admin') {
         adminControls.style.display = 'block';
-        logoutButton.style.display = 'block';
     } else {
         adminControls.style.display = 'none';
-        logoutButton.style.display = 'inline-block';
     }
+    logoutButton.style.display = 'block'; // Her durumda görünür yap
+
     await updateTotalMesaiDisplay(user.username);
     await checkActiveShift(user.username);
-    startShiftStatusChecker(user.username); // Otomatik kontrolü başlat
+    startShiftStatusChecker(user.username);
 }
 
 mesaiButton.addEventListener('click', () => {
@@ -161,20 +163,18 @@ async function mesaiBitir(kullanici) {
 function startShiftStatusChecker(username) {
     stopShiftStatusChecker();
     shiftCheckInterval = setInterval(async () => {
-        if (dashboardContainer.style.display === 'block') {
+        if (getLoggedInUser() && dashboardContainer.style.display === 'block') {
             try {
                 const response = await fetch(`${MESAI_API_URL}/search?Kullanıcı=${username}&Mesai Çıkış=`);
+                if (!response.ok) return; // Hata varsa sessizce geç
                 const activeShifts = await response.json();
                 if (activeShifts.length === 0 && mesaiButton.classList.contains('bitir')) {
-                    console.log("Otomatik kontrol: Mesainin dışarıdan kapatıldığı tespit edildi. Arayüz güncelleniyor.");
                     setMesaiButtonState('baslat');
                     durumMesaji.textContent = 'Mesainiz bir yönetici tarafından sonlandırıldı.';
                 }
-            } catch (error) {
-                console.error("Otomatik mesai durumu kontrolü sırasında hata:", error);
-            }
+            } catch (error) { /* Sessiz kal, konsola loglama */ }
         }
-    }, 30000);
+    }, 15000); // Kontrol aralığı 15 saniyeye düşürüldü
 }
 
 function stopShiftStatusChecker() {
@@ -197,6 +197,83 @@ window.addEventListener('click', (event) => {
 });
 btnRefreshList.addEventListener('click', fetchAndDisplayActiveShifts);
 
+async function fetchAndDisplayActiveShifts() { /* Öncekiyle aynı */ }
+async function adminCloseShift(shiftStartTime) { /* Öncekiyle aynı */ }
+async function adminDeleteShift(shiftStartTime) { /* Öncekiyle aynı */ }
+
+// DEĞİŞİKLİK 2: "Mesai Ekle" fonksiyonuna hata ayıklama kodları eklendi.
+addShiftForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    console.log("--- 'Mesai Ekle' Butonuna Tıklandı ---");
+
+    const username = document.getElementById('add-shift-username').value;
+    const department = document.getElementById('add-shift-department').value;
+    const start = document.getElementById('add-shift-start').value;
+    const end = document.getElementById('add-shift-end').value;
+
+    console.log("Toplanan Form Verileri:", { username, department, start, end });
+
+    if (!username || !department || !start || !end) {
+        alert('Tüm alanlar doldurulmalıdır.');
+        console.error("Hata: Formda eksik alan var.");
+        return;
+    }
+    
+    const startTime = new Date(start);
+    const endTime = new Date(end);
+
+    if (startTime >= endTime) {
+        alert('Bitiş zamanı, başlangıç zamanından sonra olmalıdır.');
+        console.error("Hata: Bitiş zamanı başlangıçtan önce veya aynı.");
+        return;
+    }
+
+    const durationInSeconds = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
+    console.log("Hesaplanan Toplam Süre (saniye):", durationInSeconds);
+
+    const shiftData = {
+        'Kullanıcı': username,
+        'Departman': department,
+        'Mesai Giriş': startTime.toISOString(),
+        'Mesai Çıkış': endTime.toISOString(),
+        'Toplam Süre': durationInSeconds
+    };
+
+    console.log("API'ye Gönderilecek Son Veri (JSON):", JSON.stringify({ data: [shiftData] }));
+
+    try {
+        const response = await fetch(MESAI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: [shiftData] })
+        });
+
+        console.log("API'den Gelen Yanıt (Response):", response);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("API Hata Detayı:", errorText);
+            throw new Error(`API'ye veri gönderilemedi. Statü: ${response.status}`);
+        }
+        
+        console.log("Başarılı: Mesai eklendi!");
+        alert(`${username} için mesai başarıyla eklendi.`);
+        addShiftForm.reset();
+        addShiftModal.style.display = 'none';
+    } catch (error) {
+        console.error("Catch Bloğuna Düşen Hata:", error);
+        alert('Mesai eklenirken bir hata oluştu: ' + error.message + ' (Detaylar için F12 > Konsol\'a bakın)');
+    }
+});
+
+btnDeleteAllShifts.addEventListener('click', async () => { /* Öncekiyle aynı */ });
+function saveUserToLocalStorage(user) { /* Öncekiyle aynı */ }
+function getLoggedInUser() { /* Öncekiyle aynı */ }
+async function updateTotalMesaiDisplay(kullanici) { /* Öncekiyle aynı */ }
+async function checkActiveShift(kullanici) { /* Öncekiyle aynı */ }
+function setMesaiButtonState(state) { /* Öncekiyle aynı */ }
+
+// --- Tekrar eden fonksiyonların tam halleri ---
 async function fetchAndDisplayActiveShifts() {
     activeShiftsList.innerHTML = '<p>Aktif mesailer yükleniyor...</p>';
     const admin = getLoggedInUser();
@@ -213,38 +290,24 @@ async function fetchAndDisplayActiveShifts() {
             shiftItem.className = 'shift-item';
             const startTime = new Date(shift['Mesai Giriş']);
             const formattedTime = startTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-            shiftItem.innerHTML = `
-                <div class="shift-info"><strong>${shift['Kullanıcı']}</strong> - Başlangıç: ${formattedTime}</div>
-                <div class="shift-actions">
-                    <button class="btn-close-shift">Mesaiyi Kapat</button>
-                    <button class="btn-delete-shift">Mesaiyi Sil</button>
-                </div>
-            `;
+            shiftItem.innerHTML = `<div class="shift-info"><strong>${shift['Kullanıcı']}</strong> - Başlangıç: ${formattedTime}</div><div class="shift-actions"><button class="btn-close-shift">Mesaiyi Kapat</button><button class="btn-delete-shift">Mesaiyi Sil</button></div>`;
             shiftItem.querySelector('.btn-close-shift').addEventListener('click', () => adminCloseShift(shift['Mesai Giriş']));
             shiftItem.querySelector('.btn-delete-shift').addEventListener('click', () => adminDeleteShift(shift['Mesai Giriş']));
             activeShiftsList.appendChild(shiftItem);
         });
-    } catch (error) {
-        activeShiftsList.innerHTML = `<p style="color: var(--danger-red);">Mesailer yüklenirken hata oluştu: ${error.message}</p>`;
-    }
+    } catch (error) { activeShiftsList.innerHTML = `<p style="color: var(--danger-red);">Mesailer yüklenirken hata oluştu: ${error.message}</p>`; }
 }
-
 async function adminCloseShift(shiftStartTime) {
     if (!confirm("Bu kullanıcının mesaisi normal şekilde sonlandırılacak. Onaylıyor musunuz?")) return;
     try {
         const baslangicTimestamp = new Date(shiftStartTime).getTime();
         const toplamSn = Math.round((Date.now() - baslangicTimestamp) / 1000);
         const bitisZamani = new Date().toISOString();
-        await fetch(`${MESAI_API_URL}/Mesai Giriş/${encodeURIComponent(shiftStartTime)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: { 'Mesai Çıkış': bitisZamani, 'Toplam Süre': toplamSn } })
-        });
+        await fetch(`${MESAI_API_URL}/Mesai Giriş/${encodeURIComponent(shiftStartTime)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { 'Mesai Çıkış': bitisZamani, 'Toplam Süre': toplamSn } }) });
         alert("Mesai başarıyla kapatıldı.");
         fetchAndDisplayActiveShifts();
     } catch (error) { alert("Mesai kapatılırken bir hata oluştu: " + error.message); }
 }
-
 async function adminDeleteShift(shiftStartTime) {
     if (!confirm("DİKKAT! Bu mesai kaydı kalıcı olarak silinecek ve hiç yapılmamış gibi olacak. Emin misiniz?")) return;
     try {
@@ -253,32 +316,6 @@ async function adminDeleteShift(shiftStartTime) {
         fetchAndDisplayActiveShifts();
     } catch (error) { alert("Mesai silinirken bir hata oluştu: " + error.message); }
 }
-
-addShiftForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const username = document.getElementById('add-shift-username').value;
-    const department = document.getElementById('add-shift-department').value;
-    const start = document.getElementById('add-shift-start').value;
-    const end = document.getElementById('add-shift-end').value;
-    if (!username || !department || !start || !end) { alert('Tüm alanlar doldurulmalıdır.'); return; }
-    const startTime = new Date(start);
-    const endTime = new Date(end);
-    if (startTime >= endTime) { alert('Bitiş zamanı, başlangıç zamanından sonra olmalıdır.'); return; }
-    const durationInSeconds = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
-    const shiftData = { 'Kullanıcı': username, 'Departman': department, 'Mesai Giriş': startTime.toISOString(), 'Mesai Çıkış': endTime.toISOString(), 'Toplam Süre': durationInSeconds };
-    try {
-        const response = await fetch(MESAI_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: [shiftData] })
-        });
-        if (!response.ok) throw new Error('API\'ye veri gönderilemedi.');
-        alert(`${username} için mesai başarıyla eklendi.`);
-        addShiftForm.reset();
-        addShiftModal.style.display = 'none';
-    } catch (error) { alert('Mesai eklenirken hata oluştu: ' + error.message); }
-});
-
 btnDeleteAllShifts.addEventListener('click', async () => {
     if (confirm("EMİN MİSİNİZ? TÜM MESAİ KAYITLARI SİLİNECEK! Bu işlem geri alınamaz.")) {
         try {
@@ -289,10 +326,8 @@ btnDeleteAllShifts.addEventListener('click', async () => {
         } catch (error) { alert('Hata: ' + error.message); }
     }
 });
-
 function saveUserToLocalStorage(user) { localStorage.setItem('loggedInUser', JSON.stringify(user)); }
 function getLoggedInUser() { return JSON.parse(localStorage.getItem('loggedInUser')); }
-
 async function updateTotalMesaiDisplay(kullanici) {
     totalMesaiDisplay.textContent = 'Hesaplanıyor...';
     try {
@@ -310,7 +345,6 @@ async function updateTotalMesaiDisplay(kullanici) {
         totalMesaiDisplay.textContent = `${pad(hours)} saat ${pad(minutes)} dakika ${pad(seconds)} saniye`;
     } catch (error) { totalMesaiDisplay.textContent = 'Hesaplanamadı!'; }
 }
-
 async function checkActiveShift(kullanici) {
     try {
         const response = await fetch(`${MESAI_API_URL}/search?Kullanıcı=${kullanici}&Mesai Çıkış=`);
@@ -319,7 +353,6 @@ async function checkActiveShift(kullanici) {
         else { setMesaiButtonState('baslat'); }
     } catch (error) { console.error("Aktif mesai kontrol edilemedi:", error); }
 }
-
 function setMesaiButtonState(state) {
     if (state === 'bitir') {
         mesaiButton.textContent = 'Mesai Bitir';
