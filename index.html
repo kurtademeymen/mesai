@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FiveM Mesai Sistemi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* --- Renk Paleti ve Değişkenler --- */
+        :root {
+            --bg-color: #1a1a2e;
+            --container-bg: #1e1e3f;
+            --primary-blue: #4a90e2;
+            --lspd-blue: #005f9e;
+            --lsmd-red: #c82333;
+            --success-green: #28a745;
+            --danger-red: #dc3545;
+            --warning-yellow: #ffc107;
+            --text-color: #e0e0e0;
+            --text-muted: #8a8a9e;
+            --border-color: #3a3a5e;
+            --input-bg: #2a2a4a;
+        }
+
+        /* --- Genel Sayfa Stilleri --- */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* --- Ana Container --- */
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--container-bg);
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+            text-align: center;
+            animation: fadeIn 0.8s ease-in-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        h1, h2 { margin-bottom: 25px; font-weight: 600; }
+        p { color: var(--text-muted); line-height: 1.6; }
+        hr { border: none; border-top: 1px solid var(--border-color); margin: 30px 0; }
+
+        /* --- Form Elemanları --- */
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            font-family: 'Poppins', sans-serif;
+            font-size: 16px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.3);
+        }
+
+        /* --- Buton Stilleri --- */
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            margin: 5px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        button:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+        .department-selection button { width: 150px; border: 2px solid transparent; background: var(--input-bg); }
+        #btnLSPD:hover { background-color: var(--lspd-blue); }
+        #btnLSMD:hover { background-color: var(--lsmd-red); }
+        .department-selection button.selected { background-color: transparent; }
+        #btnLSPD.selected { border-color: var(--lspd-blue); color: var(--lspd-blue); }
+        #btnLSMD.selected { border-color: var(--lsmd-red); color: var(--lsmd-red); }
+        #login-form-container { display: none; margin-top: 20px; }
+        #btnLogin { background-color: var(--primary-blue); width: 100%; }
+        #btnMesai { background-color: var(--success-green); width: 220px; }
+        #btnMesai.bitir { background-color: var(--danger-red); }
+        #btnToggleAdminPanel { background-color: var(--primary-blue); }
+        #btnDeleteAllShifts { background-color: var(--warning-yellow); color: #1a1a2e; }
+        #btnLogout { background-color: var(--text-muted); }
+
+        /* --- Dashboard Ekranı Özel Stilleri --- */
+        #total-mesai-container { font-size: 1.1em; margin-top: 25px; color: var(--text-color); }
+        #total-mesai-display { color: var(--primary-blue); font-weight: 600; display: block; font-size: 1.5em; margin-top: 5px; }
+        #durum { margin-top: 20px; min-height: 24px; font-weight: 500; color: var(--primary-blue); }
+
+        /* --- YENİ EKLENEN ADMIN PANELİ MODAL STILLERİ --- */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            overflow: auto; 
+            background-color: rgba(0,0,0,0.7);
+            padding-top: 60px;
+        }
+        .modal-content {
+            background-color: var(--container-bg);
+            margin: 5% auto;
+            padding: 30px;
+            border: 1px solid var(--border-color);
+            width: 90%;
+            max-width: 700px;
+            border-radius: 16px;
+            position: relative;
+            animation: fadeIn 0.5s;
+        }
+        .close-button {
+            color: var(--text-muted);
+            position: absolute;
+            top: 15px; right: 25px;
+            font-size: 30px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close-button:hover { color: var(--text-color); }
+        #active-shifts-list { margin-top: 20px; max-height: 400px; overflow-y: auto; text-align: left; }
+        .shift-item {
+            background: var(--input-bg);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .shift-info { flex-grow: 1; }
+        .shift-info strong { color: var(--primary-blue); }
+        .shift-actions button {
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+        .btn-close-shift { background-color: var(--success-green); }
+        .btn-delete-shift { background-color: var(--danger-red); }
+    </style>
+</head>
+<body>
+    <div id="login-container" class="container">
+        <h1>Departman Seçin</h1>
+        <div class="department-selection">
+            <button id="btnLSPD" data-department="LSPD">LSPD</button>
+            <button id="btnLSMD" data-department="LSMD">LSMD</button>
+        </div>
+        <div id="login-form-container">
+            <form id="login-form">
+                <input type="text" id="username" placeholder="Kullanıcı Adı" required>
+                <input type="password" id="password" placeholder="Şifre" required>
+                <button id="btnLogin" type="submit">Giriş Yap</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-container" class="container">
+        <h2 id="welcome-message">Hoş geldin!</h2>
+        <p id="total-mesai-container">Toplam Mesainiz<strong id="total-mesai-display">Hesaplanıyor...</strong></p>
+        <button id="btnMesai">Mesai Başlat</button>
+        <p id="durum"></p>
+        <hr>
+        <div id="admin-controls" style="display: none;">
+            <button id="btnToggleAdminPanel">Aktif Mesaileri Yönet</button>
+            <button id="btnDeleteAllShifts">Tüm Mesaileri Sil</button>
+        </div>
+        <button id="btnLogout">Çıkış Yap</button>
+    </div>
+
+    <div id="admin-panel-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-admin-panel" class="close-button">&times;</span>
+            <h2>Aktif Mesailer</h2>
+            <div id="active-shifts-list">
+                </div>
+            <button id="btnRefreshList" style="margin-top: 20px;">Listeyi Yenile</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
